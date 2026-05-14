@@ -26,6 +26,7 @@ import com.ibm.output.IAggregator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 import org.sonar.plugins.python.api.PythonCheck;
 import org.sonar.plugins.python.api.PythonVisitorContext;
@@ -61,5 +62,10 @@ public final class PythonAggregator implements IAggregator {
     public static void reset() {
         pythonLanguageSupport = LanguageSupporter.pythonLanguageSupporter();
         detectedNodes = new ArrayList<>();
+    }
+
+    @Nonnull
+    public static Stream<INode> streamDetectedNodes() {
+        return detectedNodes.stream();
     }
 }

@@ -21,11 +21,11 @@ package com.ibm.output;
 
 import com.ibm.mapper.model.INode;
 import java.io.File;
-import java.util.List;
+import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 
 public interface IOutputFile {
-    void add(@Nonnull List<INode> nodes);
+    void add(Stream<INode> nodes);
 
     void saveTo(@Nonnull File file);
 }

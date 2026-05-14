@@ -23,9 +23,10 @@ import com.ibm.engine.language.ILanguageSupport;
 import com.ibm.engine.language.LanguageSupporter;
 import com.ibm.mapper.model.INode;
 import com.ibm.output.IAggregator;
-import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 import javax.annotation.Nonnull;
 import org.sonar.plugins.java.api.JavaCheck;
 import org.sonar.plugins.java.api.JavaFileScannerContext;
@@ -36,20 +37,36 @@ public final class JavaAggregator implements IAggregator {
 
     private static ILanguageSupport<JavaCheck, Tree, Symbol, JavaFileScannerContext>
             javaLanguageSupport = LanguageSupporter.javaLanguageSupporter();
-    private static List<INode> detectedNodes = new ArrayList<>();
+
+    private static volatile Consumer<INode> liveConsumer = null;
+    private static int totalNodeCount = 0;
+    private static final Map<Class<? extends INode>, Long> kindDistribution = new HashMap<>();
 
     private JavaAggregator() {
         // nothing
     }
 
-    public static void addNodes(@Nonnull List<INode> newNodes) {
-        detectedNodes.addAll(newNodes);
+    public static void registerConsumer(Consumer<INode> consumer) {
+        liveConsumer = consumer;
+    }
+
+    public static synchronized void addNodes(List<INode> newNodes) {
+        for (INode node : newNodes) {
+            totalNodeCount++;
+            kindDistribution.merge(node.getKind(), 1L, Long::sum);
+            if (liveConsumer != null) {
+                liveConsumer.accept(node);
+            }
+        }
         IAggregator.log(newNodes);
     }
 
-    @Nonnull
-    public static List<INode> getDetectedNodes() {
-        return Collections.unmodifiableList(detectedNodes);
+    public static synchronized int getTotalNodeCount() {
+        return totalNodeCount;
+    }
+
+    public static synchronized Map<Class<? extends INode>, Long> getKindDistribution() {
+        return new HashMap<>(kindDistribution);
     }
 
     @Nonnull
@@ -58,8 +75,10 @@ public final class JavaAggregator implements IAggregator {
         return javaLanguageSupport;
     }
 
-    public static void reset() {
+    public static synchronized void reset() {
         javaLanguageSupport = LanguageSupporter.javaLanguageSupporter();
-        detectedNodes = new ArrayList<>();
+        liveConsumer = null;
+        totalNodeCount = 0;
+        kindDistribution.clear();
     }
 }

@@ -27,6 +27,7 @@ import com.ibm.output.IAggregator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 import org.sonar.go.symbols.Symbol;
 import org.sonar.plugins.go.api.Tree;
@@ -60,5 +61,10 @@ public final class GoAggregator implements IAggregator {
     public static void reset() {
         goLanguageSupport = LanguageSupporter.goLanguageSupporter();
         detectedNodes = new ArrayList<>();
+    }
+
+    @Nonnull
+    public static Stream<INode> streamDetectedNodes() {
+        return detectedNodes.stream();
     }
 }

@@ -105,32 +105,33 @@ public class CBOMOutputFile implements IOutputFile {
     }
 
     @Override
-    public void add(@Nonnull List<INode> nodes) {
-        add(null, nodes);
+    public synchronized void add(@Nonnull Stream<INode> nodes) {
+        nodes.forEach(node -> processSingleNode(null, node));
     }
 
-    private void add(@Nullable final String parentBomRef, @Nonnull List<INode> nodes) {
-        nodes.forEach(
-                node -> {
-                    // switch for asset
-                    if (node instanceof Algorithm algorithm) {
-                        createAlgorithmComponent(parentBomRef, algorithm);
-                    } else if (node instanceof Key key) {
-                        createKeyComponent(parentBomRef, key);
-                    } else if (node instanceof Protocol protocol) {
-                        createProtocolComponent(parentBomRef, protocol);
-                    } else if (node instanceof CipherSuite cipherSuite) {
-                        createCipherSuiteComponent(parentBomRef, cipherSuite);
-                    } else if (node instanceof SaltLength
-                            || node instanceof PasswordLength
-                            || node instanceof InitializationVectorLength
-                            || node instanceof NonceLength) {
-                        final IProperty property = (IProperty) node;
-                        createRelatedCryptoMaterialComponent(parentBomRef, property);
-                    } else if (node.hasChildren()) {
-                        add(parentBomRef, node.getChildren().values().stream().toList());
-                    }
-                });
+    private void addChildren(@Nullable final String parentBomRef, @Nonnull Iterable<INode> nodes) {
+        nodes.forEach(node -> processSingleNode(parentBomRef, node));
+    }
+
+    private void processSingleNode(@Nullable final String parentBomRef, @Nonnull INode node) {
+        if (node instanceof Algorithm algorithm) {
+            createAlgorithmComponent(parentBomRef, algorithm);
+        } else if (node instanceof Key key) {
+            createKeyComponent(parentBomRef, key);
+        } else if (node instanceof Protocol protocol) {
+            createProtocolComponent(parentBomRef, protocol);
+        } else if (node instanceof CipherSuite cipherSuite) {
+            createCipherSuiteComponent(parentBomRef, cipherSuite);
+        } else if (node instanceof SaltLength
+                || node instanceof PasswordLength
+                || node instanceof InitializationVectorLength
+                || node instanceof NonceLength) {
+            final IProperty property = (IProperty) node;
+            createRelatedCryptoMaterialComponent(parentBomRef, property);
+        } else if (node.hasChildren()) {
+            // Process children using the new helper
+            addChildren(parentBomRef, node.getChildren().values());
+        }
     }
 
     @Nullable private String createAlgorithmComponent(
@@ -303,7 +304,7 @@ public class CBOMOutputFile implements IOutputFile {
         }
 
         if (node.hasChildren()) {
-            add(componentIdentify.getBomRef(), node.getChildren().values().stream().toList());
+            addChildren(componentIdentify.getBomRef(), node.getChildren().values());
         }
     }
 
@@ -366,5 +367,9 @@ public class CBOMOutputFile implements IOutputFile {
             occurrence.setAdditionalContext(detectionLocation.keywords().get(0));
         }
         return occurrence;
+    }
+
+    public synchronized void accept(@Nonnull INode node) {
+        processSingleNode(null, node);
     }
 }

@@ -80,13 +80,14 @@ public abstract class JavaBaseDetectionRule extends IssuableSubscriptionVisitor
      */
     @Override
     public void visitNode(@Nonnull Tree tree) {
+        final JavaScanContext scanContext = new JavaScanContext(this.context);
+
         detectionRules.forEach(
                 rule -> {
                     DetectionExecutive<JavaCheck, Tree, Symbol, JavaFileScannerContext>
                             detectionExecutive =
                                     JavaAggregator.getLanguageSupport()
-                                            .createDetectionExecutive(
-                                                    tree, rule, new JavaScanContext(this.context));
+                                            .createDetectionExecutive(tree, rule, scanContext);
                     detectionExecutive.subscribe(this);
                     detectionExecutive.start();
                 });

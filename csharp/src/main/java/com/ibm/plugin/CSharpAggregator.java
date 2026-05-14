@@ -30,6 +30,7 @@ import com.ibm.output.IAggregator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 
 /** Static accumulator for C# cryptographic detection results. Mirrors {@code GoAggregator}. */
@@ -63,5 +64,10 @@ public final class CSharpAggregator implements IAggregator {
     public static void reset() {
         csharpLanguageSupport = LanguageSupporter.csharpLanguageSupporter();
         detectedNodes = new ArrayList<>();
+    }
+
+    @Nonnull
+    public static Stream<INode> streamDetectedNodes() {
+        return detectedNodes.stream();
     }
 }

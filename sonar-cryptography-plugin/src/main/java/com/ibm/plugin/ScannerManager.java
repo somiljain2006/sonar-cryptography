@@ -22,52 +22,78 @@ package com.ibm.plugin;
 import com.ibm.mapper.model.INode;
 import com.ibm.output.IOutputFile;
 import com.ibm.output.IOutputFileFactory;
+import com.ibm.output.cyclondx.CBOMOutputFile;
 import com.ibm.output.statistics.IStatistics;
 import com.ibm.output.statistics.ScanStatistics;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 public final class ScannerManager {
     private final IOutputFileFactory outputFileFactory;
+    private CBOMOutputFile liveOutputFile;
+    private boolean nonJavaMerged = false;
 
     public ScannerManager(@Nullable IOutputFileFactory outputFileFactory) {
         this.outputFileFactory = outputFileFactory;
+        this.liveOutputFile = new CBOMOutputFile();
+        JavaAggregator.registerConsumer(liveOutputFile::accept);
     }
 
     @Nonnull
     public IOutputFile getOutputFile() {
-        return Optional.ofNullable(this.outputFileFactory)
-                .orElse(IOutputFileFactory.DEFAULT)
-                .createOutputFormat(getAggregatedNodes());
+        if (!nonJavaMerged) {
+            liveOutputFile.add(
+                    Stream.of(
+                                    PythonAggregator.getDetectedNodes().stream(),
+                                    GoAggregator.getDetectedNodes().stream(),
+                                    CSharpAggregator.getDetectedNodes().stream())
+                            .flatMap(s -> s));
+            nonJavaMerged = true;
+        }
+        return liveOutputFile;
     }
 
     @Nonnull
     public IStatistics getStatistics() {
         return new ScanStatistics(
-                () -> getAggregatedNodes().size(), // numberOfDetectedAssetsSupplier
                 () ->
-                        getAggregatedNodes().stream() // numberOfAssetsPerTypeSupplier
-                                .collect(
-                                        Collectors.groupingBy(
-                                                INode::getKind, Collectors.counting())));
+                        JavaAggregator.getTotalNodeCount()
+                                + PythonAggregator.getDetectedNodes().size()
+                                + GoAggregator.getDetectedNodes().size()
+                                + CSharpAggregator.getDetectedNodes().size(),
+                () -> {
+                    Map<Class<? extends INode>, Long> combined =
+                            new HashMap<>(JavaAggregator.getKindDistribution());
+
+                    Stream.of(
+                                    PythonAggregator.getDetectedNodes(),
+                                    GoAggregator.getDetectedNodes(),
+                                    CSharpAggregator.getDetectedNodes())
+                            .forEach(
+                                    list -> {
+                                        for (INode node : list) {
+                                            Class<?> clazz = node.getKind();
+                                            if (INode.class.isAssignableFrom(clazz)) {
+                                                combined.merge(
+                                                        clazz.asSubclass(INode.class),
+                                                        1L,
+                                                        Long::sum);
+                                            }
+                                        }
+                                    });
+
+                    return combined;
+                });
     }
 
     public boolean hasResults() {
-        return !this.getAggregatedNodes().isEmpty();
-    }
-
-    @Nonnull
-    private List<INode> getAggregatedNodes() {
-        List<INode> nodes = new ArrayList<>();
-        nodes.addAll(JavaAggregator.getDetectedNodes());
-        nodes.addAll(PythonAggregator.getDetectedNodes());
-        nodes.addAll(GoAggregator.getDetectedNodes());
-        nodes.addAll(CSharpAggregator.getDetectedNodes());
-        return nodes;
+        return JavaAggregator.getTotalNodeCount() > 0
+                || !PythonAggregator.getDetectedNodes().isEmpty()
+                || !GoAggregator.getDetectedNodes().isEmpty()
+                || !CSharpAggregator.getDetectedNodes().isEmpty();
     }
 
     public void reset() {
@@ -75,5 +101,8 @@ public final class ScannerManager {
         PythonAggregator.reset();
         GoAggregator.reset();
         CSharpAggregator.reset();
+        this.liveOutputFile = new CBOMOutputFile();
+        this.nonJavaMerged = false;
+        JavaAggregator.registerConsumer(liveOutputFile::accept);
     }
 }

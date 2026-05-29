@@ -129,7 +129,6 @@ public class CBOMOutputFile implements IOutputFile {
             final IProperty property = (IProperty) node;
             createRelatedCryptoMaterialComponent(parentBomRef, property);
         } else if (node.hasChildren()) {
-            // Process children using the new helper
             addChildren(parentBomRef, node.getChildren().values());
         }
     }

@@ -39,8 +39,6 @@ class CBOMOutputFileRegressionTest {
 
     @Test
     void goldenFileRegressionTest() throws Exception {
-        // 1. AST Setup: First occurrence of AES with a dependent Key
-        // This validates parent bom-ref linkage and evidence assembly
         DetectionLocation loc1 = mockLocation("src/A.java", 10, 5, "AES");
         Algorithm aes1 = mockNode(Algorithm.class, "AES", loc1);
 
@@ -49,36 +47,27 @@ class CBOMOutputFileRegressionTest {
         doReturn(Map.of(Key.class, key1)).when(aes1).getChildren();
         doReturn(true).when(aes1).hasChildren();
 
-        // 2. AST Setup: Second occurrence of AES (in a different file)
-        // This validates component deduplication and occurrence counting
         DetectionLocation loc2 = mockLocation("src/B.java", 20, 2, "AES");
         Algorithm aes2 = mockNode(Algorithm.class, "AES", loc2);
         doReturn(Map.of()).when(aes2).getChildren();
 
-        // 3. Process the nodes using the new refactored pipeline
         CBOMOutputFile cbomOutputFile = new CBOMOutputFile();
         cbomOutputFile.add((Iterable<INode>) List.<INode>of(aes1, aes2));
         Bom bom = cbomOutputFile.getBom();
 
-        // 4. Normalize dynamic fields (timestamps and versions)
         bom.getMetadata().setTimestamp(null);
         if (bom.getMetadata().getToolChoice() != null
                 && !bom.getMetadata().getToolChoice().getServices().isEmpty()) {
             bom.getMetadata().getToolChoice().getServices().get(0).setVersion("1.0.0");
         }
 
-        // 5. Generate JSON output
         String jsonOutput = BomGeneratorFactory.createJson(Version.VERSION_16, bom).toJsonString();
 
-        // Regex replace ALL UUIDs (including random bom-refs, serialNumbers, and generated names)
-        // with STATIC-UUID
-        // This guarantees the test is 100% deterministic on every run.
         jsonOutput =
                 jsonOutput.replaceAll(
                         "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
                         "STATIC-UUID");
 
-        // 6. Assert against Golden File String representing the actual plugin schema
         String expectedGoldenJson =
                 """
         {
@@ -158,8 +147,6 @@ class CBOMOutputFileRegressionTest {
         }
         """;
 
-        // Strip whitespaces to ensure formatting changes don't fail the functional equivalence
-        // check
         assertThat(jsonOutput.replaceAll("\\s+", ""))
                 .isEqualTo(expectedGoldenJson.replaceAll("\\s+", ""));
     }

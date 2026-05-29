@@ -49,11 +49,9 @@ public final class ScannerManager {
     }
 
     private void initialize() {
-        // 1. Explicitly type the empty list as an Iterable to bypass the deprecated List method
         Iterable<INode> emptyIterable = List.of();
         this.liveOutputFile = this.outputFileFactory.createOutputFormat(emptyIterable);
 
-        // 2. Explicitly type the single node as an Iterable to bypass the deprecated List method
         Consumer<INode> streamingConsumer =
                 node -> {
                     Iterable<INode> singleNodeIterable = List.of(node);
@@ -123,8 +121,6 @@ public final class ScannerManager {
         }
         initialize();
     }
-
-    /* Reflection Helpers to handle compile-time decoupled language modules */
 
     private void registerConsumerWithAggregator(String className, Consumer<INode> consumer) {
         try {

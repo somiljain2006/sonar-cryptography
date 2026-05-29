@@ -24,14 +24,6 @@ import java.io.File;
 import java.util.List;
 import java.util.function.Consumer;
 
-/**
- * Represents the output target for aggregated scan results. *
- *
- * <p><b>State Semantics & Recursion Invariant:</b> The {@link INode} tree structure passed to this
- * interface <b>must be acyclic (no circular references)</b>. Downstream serialization components
- * and statistical counters traverse these nodes recursively; introducing a cycle in the node graph
- * will result in infinite loops or {@code StackOverflowError}s.
- */
 public interface IOutputFile extends Consumer<INode> {
 
     /**

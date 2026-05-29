@@ -189,26 +189,20 @@ class JavaAggregatorTest {
         CountDownLatch doneLatch = new CountDownLatch(threadCount);
 
         INode node = mockNode(AlgorithmStub.class);
-        List<INode> payload = List.of(node, node, node); // 3 nodes per batch
+        List<INode> payload = List.of(node, node, node);
 
         for (int i = 0; i < threadCount; i++) {
             final int threadId = i;
             executor.submit(
                     () -> {
                         try {
-                            startLatch.await(); // Wait for all threads to be ready
+                            startLatch.await();
                             for (int j = 0; j < iterationsPerThread; j++) {
-                                // Thread 0 occasionally resets, mimicking a concurrent lifecycle
-                                // event
                                 if (threadId == 0 && j % 100 == 0) {
                                     JavaAggregator.reset();
                                 } else {
                                     JavaAggregator.addNodes(payload);
 
-                                    // Using AssertJ assertions reads the values and validates
-                                    // thread safety,
-                                    // eliminating both "result ignored" and "never used" warnings
-                                    // safely.
                                     assertThat(JavaAggregator.getKindDistribution()).isNotNull();
                                     assertThat(JavaAggregator.getTotalNodeCount())
                                             .isGreaterThanOrEqualTo(0);
@@ -222,10 +216,8 @@ class JavaAggregatorTest {
                     });
         }
 
-        // Unleash the threads simultaneously
         startLatch.countDown();
 
-        // Wait for execution to finish
         boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
         executor.shutdown();
 
@@ -233,8 +225,6 @@ class JavaAggregatorTest {
                 .as("Stress test timed out! Possible deadlock in Aggregator.")
                 .isTrue();
 
-        // As long as no exceptions were thrown (like ConcurrentModificationException),
-        // the thread-safety architecture is validated.
         assertThat(JavaAggregator.getTotalNodeCount()).isGreaterThanOrEqualTo(0);
     }
 

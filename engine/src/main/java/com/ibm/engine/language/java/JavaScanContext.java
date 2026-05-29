@@ -26,8 +26,18 @@ import org.sonar.plugins.java.api.JavaCheck;
 import org.sonar.plugins.java.api.JavaFileScannerContext;
 import org.sonar.plugins.java.api.tree.Tree;
 
-public record JavaScanContext(@Nonnull JavaFileScannerContext javaFileScannerContext)
+public record JavaScanContext(
+        @Nonnull JavaFileScannerContext javaFileScannerContext, @Nonnull String filePath)
         implements IScanContext<JavaCheck, Tree> {
+
+    /**
+     * Hoist optimization: Extracts the file path exactly once during context creation to avoid
+     * repeatedly traversing the InputFile URI graph during AST visitation.
+     */
+    public JavaScanContext(@Nonnull JavaFileScannerContext javaFileScannerContext) {
+        this(javaFileScannerContext, javaFileScannerContext.getInputFile().uri().getPath());
+    }
+
     @Override
     public void reportIssue(
             @Nonnull JavaCheck currentRule, @Nonnull Tree tree, @Nonnull String message) {
@@ -43,6 +53,6 @@ public record JavaScanContext(@Nonnull JavaFileScannerContext javaFileScannerCon
     @Nonnull
     @Override
     public String getFilePath() {
-        return this.javaFileScannerContext.getInputFile().uri().getPath();
+        return this.filePath;
     }
 }

@@ -21,11 +21,46 @@ package com.ibm.output;
 
 import com.ibm.mapper.model.INode;
 import java.io.File;
-import java.util.stream.Stream;
-import javax.annotation.Nonnull;
+import java.util.List;
+import java.util.function.Consumer;
 
-public interface IOutputFile {
-    void add(Stream<INode> nodes);
+/**
+ * Represents the output target for aggregated scan results. *
+ *
+ * <p><b>State Semantics & Recursion Invariant:</b> The {@link INode} tree structure passed to this
+ * interface <b>must be acyclic (no circular references)</b>. Downstream serialization components
+ * and statistical counters traverse these nodes recursively; introducing a cycle in the node graph
+ * will result in infinite loops or {@code StackOverflowError}s.
+ */
+public interface IOutputFile extends Consumer<INode> {
 
-    void saveTo(@Nonnull File file);
+    /**
+     * Adds a collection or sequence of nodes to the output structure.
+     *
+     * @param nodes an {@link Iterable} of {@link INode} objects
+     */
+    void add(Iterable<INode> nodes);
+
+    /**
+     * Ergonomic helper to add a single node directly. Naturally aligns with functional streaming
+     * patterns.
+     *
+     * @param node a single {@link INode} to append
+     */
+    @Override
+    default void accept(INode node) {
+        add(List.of(node));
+    }
+
+    /**
+     * Backward-compatibility shim for legacy callers compiled against the List signature.
+     *
+     * @deprecated Use {@link #add(Iterable)} instead.
+     */
+    @Deprecated(forRemoval = true)
+    default void add(List<INode> nodes) {
+        add((Iterable<INode>) nodes);
+    }
+
+    void saveTo(File file);
 }

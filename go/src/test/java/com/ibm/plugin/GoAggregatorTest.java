@@ -20,7 +20,11 @@
 package com.ibm.plugin;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import com.ibm.mapper.model.INode;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -37,13 +41,19 @@ class GoAggregatorTest {
     }
 
     @Test
-    void shouldStartWithEmptyDetectedNodes() {
-        assertThat(GoAggregator.getDetectedNodes()).isEmpty();
+    void shouldStartWithEmptyCounts() {
+        assertThat(GoAggregator.getTotalNodeCount()).isZero();
+        assertThat(GoAggregator.getKindDistribution()).isEmpty();
     }
 
     @Test
-    void shouldReturnUnmodifiableList() {
-        var nodes = GoAggregator.getDetectedNodes();
-        assertThat(nodes).isNotNull();
+    void shouldTrackNodeCountsAndDistributions() {
+        INode mockNode = mock(INode.class);
+        when(mockNode.getKind()).thenAnswer(invocation -> INode.class);
+
+        GoAggregator.addNodes(List.of(mockNode, mockNode));
+
+        assertThat(GoAggregator.getTotalNodeCount()).isEqualTo(2);
+        assertThat(GoAggregator.getKindDistribution()).containsEntry(INode.class, 2L);
     }
 }

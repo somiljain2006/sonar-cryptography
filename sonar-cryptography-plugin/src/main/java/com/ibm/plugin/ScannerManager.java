@@ -22,87 +22,156 @@ package com.ibm.plugin;
 import com.ibm.mapper.model.INode;
 import com.ibm.output.IOutputFile;
 import com.ibm.output.IOutputFileFactory;
-import com.ibm.output.cyclondx.CBOMOutputFile;
 import com.ibm.output.statistics.IStatistics;
 import com.ibm.output.statistics.ScanStatistics;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
+import java.util.function.Consumer;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 public final class ScannerManager {
+    private static final List<String> AGGREGATORS =
+            List.of(
+                    "com.ibm.plugin.JavaAggregator",
+                    "com.ibm.plugin.PythonAggregator",
+                    "com.ibm.plugin.GoAggregator",
+                    "com.ibm.plugin.CSharpAggregator");
+
     private final IOutputFileFactory outputFileFactory;
-    private CBOMOutputFile liveOutputFile;
-    private boolean nonJavaMerged = false;
+    private IOutputFile liveOutputFile;
 
     public ScannerManager(@Nullable IOutputFileFactory outputFileFactory) {
-        this.outputFileFactory = outputFileFactory;
-        this.liveOutputFile = new CBOMOutputFile();
-        JavaAggregator.registerConsumer(liveOutputFile::accept);
+        this.outputFileFactory =
+                outputFileFactory != null ? outputFileFactory : IOutputFileFactory.DEFAULT;
+        initialize();
     }
 
-    @Nonnull
-    public IOutputFile getOutputFile() {
-        if (!nonJavaMerged) {
-            liveOutputFile.add(
-                    Stream.of(
-                                    PythonAggregator.getDetectedNodes().stream(),
-                                    GoAggregator.getDetectedNodes().stream(),
-                                    CSharpAggregator.getDetectedNodes().stream())
-                            .flatMap(s -> s));
-            nonJavaMerged = true;
+    private void initialize() {
+        // 1. Explicitly type the empty list as an Iterable to bypass the deprecated List method
+        Iterable<INode> emptyIterable = List.of();
+        this.liveOutputFile = this.outputFileFactory.createOutputFormat(emptyIterable);
+
+        // 2. Explicitly type the single node as an Iterable to bypass the deprecated List method
+        Consumer<INode> streamingConsumer =
+                node -> {
+                    Iterable<INode> singleNodeIterable = List.of(node);
+                    this.liveOutputFile.add(singleNodeIterable);
+                };
+
+        for (String aggregator : AGGREGATORS) {
+            registerConsumerWithAggregator(aggregator, streamingConsumer);
         }
+    }
+
+    /**
+     * Retrieves the current output file containing the aggregated scan results.
+     *
+     * <p><b>Lifecycle / State Semantics:</b>
+     *
+     * <ul>
+     *   <li><b>Live Reference:</b> This method returns a reference to the <i>live</i> {@link
+     *       IOutputFile} instance actively being populated by the sensor streams.
+     *   <li><b>Safe Early Invocation:</b> Retrieving this object before the scan finishes will
+     *       <b>not</b> freeze its state or permanently produce incomplete output. The returned
+     *       instance will automatically reflect new nodes as they are detected.
+     *   <li><b>Finalization:</b> While the reference can be obtained at any time, consumers <b>must
+     *       wait</b> until the entire scanner execution lifecycle is complete before serializing or
+     *       exporting the file contents to ensure a complete dataset.
+     * </ul>
+     *
+     * @return The live, continuously updatable output file.
+     */
+    @Nonnull
+    public synchronized IOutputFile getOutputFile() {
         return liveOutputFile;
     }
 
     @Nonnull
     public IStatistics getStatistics() {
         return new ScanStatistics(
-                () ->
-                        JavaAggregator.getTotalNodeCount()
-                                + PythonAggregator.getDetectedNodes().size()
-                                + GoAggregator.getDetectedNodes().size()
-                                + CSharpAggregator.getDetectedNodes().size(),
                 () -> {
-                    Map<Class<? extends INode>, Long> combined =
-                            new HashMap<>(JavaAggregator.getKindDistribution());
-
-                    Stream.of(
-                                    PythonAggregator.getDetectedNodes(),
-                                    GoAggregator.getDetectedNodes(),
-                                    CSharpAggregator.getDetectedNodes())
-                            .forEach(
-                                    list -> {
-                                        for (INode node : list) {
-                                            Class<?> clazz = node.getKind();
-                                            if (INode.class.isAssignableFrom(clazz)) {
-                                                combined.merge(
-                                                        clazz.asSubclass(INode.class),
-                                                        1L,
-                                                        Long::sum);
-                                            }
-                                        }
-                                    });
-
+                    long total = 0;
+                    for (String aggregator : AGGREGATORS) {
+                        total += getTotalNodeCount(aggregator);
+                    }
+                    return (int) total;
+                },
+                () -> {
+                    Map<Class<? extends INode>, Long> combined = new HashMap<>();
+                    for (String aggregator : AGGREGATORS) {
+                        getKindDistribution(aggregator)
+                                .forEach((k, v) -> combined.merge(k, v, Long::sum));
+                    }
                     return combined;
                 });
     }
 
     public boolean hasResults() {
-        return JavaAggregator.getTotalNodeCount() > 0
-                || !PythonAggregator.getDetectedNodes().isEmpty()
-                || !GoAggregator.getDetectedNodes().isEmpty()
-                || !CSharpAggregator.getDetectedNodes().isEmpty();
+        for (String aggregator : AGGREGATORS) {
+            if (getTotalNodeCount(aggregator) > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    public void reset() {
-        JavaAggregator.reset();
-        PythonAggregator.reset();
-        GoAggregator.reset();
-        CSharpAggregator.reset();
-        this.liveOutputFile = new CBOMOutputFile();
-        this.nonJavaMerged = false;
-        JavaAggregator.registerConsumer(liveOutputFile::accept);
+    public synchronized void reset() {
+        for (String aggregator : AGGREGATORS) {
+            resetAggregator(aggregator);
+        }
+        initialize();
+    }
+
+    /* Reflection Helpers to handle compile-time decoupled language modules */
+
+    private void registerConsumerWithAggregator(String className, Consumer<INode> consumer) {
+        try {
+            Class<?> clazz = Class.forName(className);
+            java.lang.reflect.Method method = clazz.getMethod("registerConsumer", Consumer.class);
+            method.invoke(null, consumer);
+        } catch (ClassNotFoundException e) {
+            // Language module not active/loaded at runtime
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private long getTotalNodeCount(String className) {
+        try {
+            Class<?> clazz = Class.forName(className);
+            java.lang.reflect.Method method = clazz.getMethod("getTotalNodeCount");
+            return ((Number) method.invoke(null)).longValue();
+        } catch (ClassNotFoundException e) {
+            return 0;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<Class<? extends INode>, Long> getKindDistribution(String className) {
+        try {
+            Class<?> clazz = Class.forName(className);
+            java.lang.reflect.Method method = clazz.getMethod("getKindDistribution");
+            return (Map<Class<? extends INode>, Long>) method.invoke(null);
+        } catch (ClassNotFoundException e) {
+            return Map.of();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void resetAggregator(String className) {
+        try {
+            Class<?> clazz = Class.forName(className);
+            java.lang.reflect.Method method = clazz.getMethod("reset");
+            method.invoke(null);
+        } catch (ClassNotFoundException e) {
+            // Language module not active/loaded at runtime
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

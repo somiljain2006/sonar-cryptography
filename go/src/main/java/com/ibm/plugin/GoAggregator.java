@@ -24,10 +24,10 @@ import com.ibm.engine.language.LanguageSupporter;
 import com.ibm.engine.language.go.GoScanContext;
 import com.ibm.mapper.model.INode;
 import com.ibm.output.IAggregator;
-import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import java.util.stream.Stream;
+import java.util.Map;
+import java.util.function.Consumer;
 import javax.annotation.Nonnull;
 import org.sonar.go.symbols.Symbol;
 import org.sonar.plugins.go.api.Tree;
@@ -37,10 +37,20 @@ public final class GoAggregator implements IAggregator {
 
     private static ILanguageSupport<GoCheck, Tree, Symbol, GoScanContext> goLanguageSupport =
             LanguageSupporter.goLanguageSupporter();
-    private static List<INode> detectedNodes = new ArrayList<>();
+
+    private static volatile Consumer<INode> liveConsumer = null;
+    private static int totalNodeCount = 0;
+    private static final Map<Class<? extends INode>, Long> kindDistribution = new HashMap<>();
 
     private GoAggregator() {
         // nothing
+    }
+
+    public static synchronized void registerConsumer(Consumer<INode> consumer) {
+        if (liveConsumer != null && liveConsumer != consumer) {
+            throw new IllegalStateException("A consumer is already registered.");
+        }
+        liveConsumer = consumer;
     }
 
     @Nonnull
@@ -48,23 +58,43 @@ public final class GoAggregator implements IAggregator {
         return goLanguageSupport;
     }
 
-    @Nonnull
-    public static List<INode> getDetectedNodes() {
-        return Collections.unmodifiableList(detectedNodes);
-    }
-
-    public static void addNodes(@Nonnull List<INode> newNodes) {
-        detectedNodes.addAll(newNodes);
+    public static synchronized void addNodes(@Nonnull List<INode> newNodes) {
+        for (INode node : newNodes) {
+            recordNodeAndChildren(node);
+            if (liveConsumer != null) {
+                liveConsumer.accept(node);
+            }
+        }
         IAggregator.log(newNodes);
     }
 
-    public static void reset() {
-        goLanguageSupport = LanguageSupporter.goLanguageSupporter();
-        detectedNodes = new ArrayList<>();
+    private static void recordNodeAndChildren(INode node) {
+        if (node == null) return;
+        totalNodeCount++;
+        kindDistribution.merge(node.getKind(), 1L, Long::sum);
+
+        if (node.hasChildren()) {
+            node.getChildren();
+            for (INode child : node.getChildren().values()) {
+                recordNodeAndChildren(child);
+            }
+        }
     }
 
-    @Nonnull
-    public static Stream<INode> streamDetectedNodes() {
-        return detectedNodes.stream();
+    @SuppressWarnings({"unused", "UnusedReturnValue"})
+    public static synchronized int getTotalNodeCount() {
+        return totalNodeCount;
+    }
+
+    @SuppressWarnings({"unused", "UnusedReturnValue"})
+    public static synchronized Map<Class<? extends INode>, Long> getKindDistribution() {
+        return new HashMap<>(kindDistribution);
+    }
+
+    public static synchronized void reset() {
+        goLanguageSupport = LanguageSupporter.goLanguageSupporter();
+        liveConsumer = null;
+        totalNodeCount = 0;
+        kindDistribution.clear();
     }
 }

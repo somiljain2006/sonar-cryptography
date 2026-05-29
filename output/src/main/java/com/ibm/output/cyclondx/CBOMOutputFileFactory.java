@@ -20,14 +20,15 @@
 package com.ibm.output.cyclondx;
 
 import com.ibm.mapper.model.INode;
+import com.ibm.output.IOutputFile;
 import com.ibm.output.IOutputFileFactory;
-import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 
 public class CBOMOutputFileFactory implements IOutputFileFactory {
+
     @Nonnull
     @Override
-    public CBOMOutputFile createOutputFormat(@Nonnull Stream<INode> nodes) {
+    public IOutputFile createOutputFormat(@Nonnull Iterable<INode> nodes) {
         CBOMOutputFile outputFile = new CBOMOutputFile();
         outputFile.add(nodes);
         return outputFile;

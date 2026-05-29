@@ -26,8 +26,6 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
 import com.ibm.mapper.model.INode;
 import com.ibm.output.IOutputFile;
@@ -65,18 +63,28 @@ class ScannerManagerTest {
         goMock = mockStatic(GoAggregator.class);
         csharpMock = mockStatic(CSharpAggregator.class);
 
+        //noinspection ResultOfMethodCallIgnored
         javaMock.when(JavaAggregator::getTotalNodeCount).thenReturn(0);
         javaMock.when(JavaAggregator::getKindDistribution).thenReturn(Map.of());
         javaMock.when(() -> JavaAggregator.registerConsumer(any())).thenAnswer(inv -> null);
         javaMock.when(JavaAggregator::reset).thenAnswer(inv -> null);
 
-        pythonMock.when(PythonAggregator::getDetectedNodes).thenReturn(List.of());
+        //noinspection ResultOfMethodCallIgnored
+        pythonMock.when(PythonAggregator::getTotalNodeCount).thenReturn(0);
+        pythonMock.when(PythonAggregator::getKindDistribution).thenReturn(Map.of());
+        pythonMock.when(() -> PythonAggregator.registerConsumer(any())).thenAnswer(inv -> null);
         pythonMock.when(PythonAggregator::reset).thenAnswer(inv -> null);
 
-        goMock.when(GoAggregator::getDetectedNodes).thenReturn(List.of());
+        //noinspection ResultOfMethodCallIgnored
+        goMock.when(GoAggregator::getTotalNodeCount).thenReturn(0);
+        goMock.when(GoAggregator::getKindDistribution).thenReturn(Map.of());
+        goMock.when(() -> GoAggregator.registerConsumer(any())).thenAnswer(inv -> null);
         goMock.when(GoAggregator::reset).thenAnswer(inv -> null);
 
-        csharpMock.when(CSharpAggregator::getDetectedNodes).thenReturn(List.of());
+        //noinspection ResultOfMethodCallIgnored
+        csharpMock.when(CSharpAggregator::getTotalNodeCount).thenReturn(0);
+        csharpMock.when(CSharpAggregator::getKindDistribution).thenReturn(Map.of());
+        csharpMock.when(() -> CSharpAggregator.registerConsumer(any())).thenAnswer(inv -> null);
         csharpMock.when(CSharpAggregator::reset).thenAnswer(inv -> null);
     }
 
@@ -89,10 +97,13 @@ class ScannerManagerTest {
     }
 
     @Test
-    void constructor_registersConsumerWithJavaAggregator() {
+    void constructor_registersConsumerWithAllAggregators() {
         new ScannerManager(null);
 
         javaMock.verify(() -> JavaAggregator.registerConsumer(any()), times(1));
+        pythonMock.verify(() -> PythonAggregator.registerConsumer(any()), times(1));
+        goMock.verify(() -> GoAggregator.registerConsumer(any()), times(1));
+        csharpMock.verify(() -> CSharpAggregator.registerConsumer(any()), times(1));
     }
 
     @Test
@@ -100,6 +111,8 @@ class ScannerManagerTest {
         new ScannerManager(null);
 
         javaMock.verify(() -> JavaAggregator.registerConsumer(argThat(Objects::nonNull)), times(1));
+        pythonMock.verify(
+                () -> PythonAggregator.registerConsumer(argThat(Objects::nonNull)), times(1));
     }
 
     @Test
@@ -121,51 +134,43 @@ class ScannerManagerTest {
     }
 
     @Test
-    void getOutputFile_mergesNonJavaNodesExactlyOnce() {
-        pythonMock.when(PythonAggregator::getDetectedNodes).thenReturn(List.of(pythonNode));
-        goMock.when(GoAggregator::getDetectedNodes).thenReturn(List.of(goNode));
-        csharpMock.when(CSharpAggregator::getDetectedNodes).thenReturn(List.of(csharpNode));
-
-        ScannerManager manager = new ScannerManager(null);
-
-        IOutputFile first = manager.getOutputFile();
-        IOutputFile second = manager.getOutputFile();
-
-        assertThat(first).isNotNull();
-        assertThat(second).isNotNull();
-
-        pythonMock.verify(PythonAggregator::getDetectedNodes, times(1));
-        goMock.verify(GoAggregator::getDetectedNodes, times(1));
-        csharpMock.verify(CSharpAggregator::getDetectedNodes, times(1));
-    }
-
-    @Test
     void getOutputFile_usesCustomFactory_whenProvided() {
         IOutputFileFactory factory = mock(IOutputFileFactory.class);
-        new ScannerManager(factory);
-        verifyNoInteractions(factory);
+        IOutputFile mockFile = mock(IOutputFile.class);
+
+        // 1. Explicitly type the matcher as Iterable to bypass the deprecated List method
+        org.mockito.Mockito.when(
+                        factory.createOutputFormat(
+                                org.mockito.ArgumentMatchers.<Iterable<INode>>any()))
+                .thenReturn(mockFile);
+
+        ScannerManager manager = new ScannerManager(factory);
+
+        // 2. Explicitly type the verify matcher as well
+        org.mockito.Mockito.verify(factory, times(1))
+                .createOutputFormat(org.mockito.ArgumentMatchers.<Iterable<INode>>any());
+
+        // Verify that ScannerManager is using the output file generated by our custom factory
+        assertThat(manager.getOutputFile()).isSameAs(mockFile);
     }
 
     @Test
     void getStatistics_totalNodeCount_sumAllLanguages() {
         //noinspection ResultOfMethodCallIgnored
         javaMock.when(JavaAggregator::getTotalNodeCount).thenReturn(3);
-        pythonMock
-                .when(PythonAggregator::getDetectedNodes)
-                .thenReturn(List.of(pythonNode, pythonNode));
-        goMock.when(GoAggregator::getDetectedNodes).thenReturn(List.of(goNode));
-        csharpMock.when(CSharpAggregator::getDetectedNodes).thenReturn(List.of(csharpNode));
-
-        when(pythonNode.getKind()).thenAnswer(inv -> pythonNode.getClass());
-        when(goNode.getKind()).thenAnswer(inv -> goNode.getClass());
-        when(csharpNode.getKind()).thenAnswer(inv -> csharpNode.getClass());
+        //noinspection ResultOfMethodCallIgnored
+        pythonMock.when(PythonAggregator::getTotalNodeCount).thenReturn(2);
+        //noinspection ResultOfMethodCallIgnored
+        goMock.when(GoAggregator::getTotalNodeCount).thenReturn(1);
+        //noinspection ResultOfMethodCallIgnored
+        csharpMock.when(CSharpAggregator::getTotalNodeCount).thenReturn(4);
 
         ScannerManager manager = new ScannerManager(null);
         List<String> output = new ArrayList<>();
 
         manager.getStatistics().print(output::add);
 
-        assertThat(output).isNotEmpty();
+        assertThat(output).anyMatch(line -> line.contains("10"));
     }
 
     @Test
@@ -183,13 +188,13 @@ class ScannerManagerTest {
 
     @Test
     void getStatistics_kindDistribution_includesNonJavaNodes() {
-        when(pythonNode.getKind()).thenAnswer(inv -> pythonNode.getClass());
-        when(goNode.getKind()).thenAnswer(inv -> goNode.getClass());
-        when(csharpNode.getKind()).thenAnswer(inv -> csharpNode.getClass());
+        Class<? extends INode> pythonKind = pythonNode.getClass().asSubclass(INode.class);
+        Class<? extends INode> goKind = goNode.getClass().asSubclass(INode.class);
+        Class<? extends INode> csharpKind = csharpNode.getClass().asSubclass(INode.class);
 
-        pythonMock.when(PythonAggregator::getDetectedNodes).thenReturn(List.of(pythonNode));
-        goMock.when(GoAggregator::getDetectedNodes).thenReturn(List.of(goNode));
-        csharpMock.when(CSharpAggregator::getDetectedNodes).thenReturn(List.of(csharpNode));
+        pythonMock.when(PythonAggregator::getKindDistribution).thenReturn(Map.of(pythonKind, 2L));
+        goMock.when(GoAggregator::getKindDistribution).thenReturn(Map.of(goKind, 3L));
+        csharpMock.when(CSharpAggregator::getKindDistribution).thenReturn(Map.of(csharpKind, 4L));
 
         ScannerManager manager = new ScannerManager(null);
 
@@ -222,8 +227,8 @@ class ScannerManagerTest {
 
     @Test
     void hasResults_returnsTrue_whenPythonHasNodes() {
-        pythonMock.when(PythonAggregator::getDetectedNodes).thenReturn(List.of(pythonNode));
-
+        //noinspection ResultOfMethodCallIgnored
+        pythonMock.when(PythonAggregator::getTotalNodeCount).thenReturn(1);
         ScannerManager manager = new ScannerManager(null);
 
         assertThat(manager.hasResults()).isTrue();
@@ -231,8 +236,8 @@ class ScannerManagerTest {
 
     @Test
     void hasResults_returnsTrue_whenGoHasNodes() {
-        goMock.when(GoAggregator::getDetectedNodes).thenReturn(List.of(goNode));
-
+        //noinspection ResultOfMethodCallIgnored
+        goMock.when(GoAggregator::getTotalNodeCount).thenReturn(1);
         ScannerManager manager = new ScannerManager(null);
 
         assertThat(manager.hasResults()).isTrue();
@@ -240,8 +245,8 @@ class ScannerManagerTest {
 
     @Test
     void hasResults_returnsTrue_whenCSharpHasNodes() {
-        csharpMock.when(CSharpAggregator::getDetectedNodes).thenReturn(List.of(csharpNode));
-
+        //noinspection ResultOfMethodCallIgnored
+        csharpMock.when(CSharpAggregator::getTotalNodeCount).thenReturn(1);
         ScannerManager manager = new ScannerManager(null);
 
         assertThat(manager.hasResults()).isTrue();
@@ -259,27 +264,14 @@ class ScannerManagerTest {
     }
 
     @Test
-    void reset_reRegistersConsumerWithJavaAggregator() {
+    void reset_reRegistersConsumerWithAllAggregators() {
         ScannerManager manager = new ScannerManager(null);
         manager.reset();
 
         javaMock.verify(() -> JavaAggregator.registerConsumer(any()), times(2));
-    }
-
-    @Test
-    void reset_allowsNonJavaNodesToBeMergedAgainOnNextGetOutputFile() {
-        pythonMock.when(PythonAggregator::getDetectedNodes).thenReturn(List.of(pythonNode));
-
-        ScannerManager manager = new ScannerManager(null);
-
-        IOutputFile firstOutput = manager.getOutputFile();
-        manager.reset();
-        IOutputFile secondOutput = manager.getOutputFile();
-
-        assertThat(firstOutput).isNotNull();
-        assertThat(secondOutput).isNotNull();
-
-        pythonMock.verify(PythonAggregator::getDetectedNodes, times(2));
+        pythonMock.verify(() -> PythonAggregator.registerConsumer(any()), times(2));
+        goMock.verify(() -> GoAggregator.registerConsumer(any()), times(2));
+        csharpMock.verify(() -> CSharpAggregator.registerConsumer(any()), times(2));
     }
 
     @Test

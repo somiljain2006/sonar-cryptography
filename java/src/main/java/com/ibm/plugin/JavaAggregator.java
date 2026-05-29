@@ -46,19 +46,34 @@ public final class JavaAggregator implements IAggregator {
         // nothing
     }
 
-    public static void registerConsumer(Consumer<INode> consumer) {
+    public static synchronized void registerConsumer(Consumer<INode> consumer) {
+        if (liveConsumer != null && liveConsumer != consumer) {
+            throw new IllegalStateException(
+                    "A consumer is already registered. Concurrent multi-module scans are not supported with static aggregation.");
+        }
         liveConsumer = consumer;
     }
 
     public static synchronized void addNodes(List<INode> newNodes) {
         for (INode node : newNodes) {
-            totalNodeCount++;
-            kindDistribution.merge(node.getKind(), 1L, Long::sum);
+            recordNodeAndChildren(node);
             if (liveConsumer != null) {
                 liveConsumer.accept(node);
             }
         }
         IAggregator.log(newNodes);
+    }
+
+    private static void recordNodeAndChildren(INode node) {
+        totalNodeCount++;
+        kindDistribution.merge(node.getKind(), 1L, Long::sum);
+
+        if (node.hasChildren()) {
+            node.getChildren();
+            for (INode child : node.getChildren().values()) {
+                recordNodeAndChildren(child);
+            }
+        }
     }
 
     public static synchronized int getTotalNodeCount() {

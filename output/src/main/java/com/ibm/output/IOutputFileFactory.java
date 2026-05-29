@@ -21,12 +21,23 @@ package com.ibm.output;
 
 import com.ibm.mapper.model.INode;
 import com.ibm.output.cyclondx.CBOMOutputFileFactory;
-import java.util.stream.Stream;
+import java.util.List;
 import javax.annotation.Nonnull;
 
 public interface IOutputFileFactory {
-    public static IOutputFileFactory DEFAULT = new CBOMOutputFileFactory();
+    IOutputFileFactory DEFAULT = new CBOMOutputFileFactory();
 
     @Nonnull
-    IOutputFile createOutputFormat(Stream<INode> nodes);
+    IOutputFile createOutputFormat(Iterable<INode> nodes);
+
+    /**
+     * Backward-compatibility shim for legacy callers compiled against the List signature.
+     *
+     * @deprecated Use {@link #createOutputFormat(Iterable)} instead.
+     */
+    @Deprecated(forRemoval = true)
+    @Nonnull
+    default IOutputFile createOutputFormat(List<INode> nodes) {
+        return createOutputFormat((Iterable<INode>) nodes);
+    }
 }

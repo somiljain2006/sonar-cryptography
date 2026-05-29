@@ -32,7 +32,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 import org.cyclonedx.Version;
 import org.cyclonedx.exception.GeneratorException;
@@ -67,7 +66,7 @@ public abstract class TestBase {
         Utils.printNodeTree("tree", nodeSupplier.get().stream().toList());
         // create bom
         final CBOMOutputFile outputFile = new CBOMOutputFile();
-        nodeSupplier.get().forEach(node -> outputFile.add(Stream.of(node)));
+        nodeSupplier.get().forEach(node -> outputFile.add((Iterable<INode>) List.of(node)));
         final Bom bom = outputFile.getBom();
         this.printBom(bom);
         // check bom header

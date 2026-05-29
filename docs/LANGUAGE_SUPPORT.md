@@ -293,9 +293,9 @@ Here, for each visited node of the AST and for each `IDetectionRule` detection r
 Additionally, the intermediary class (`JavaBaseDetectionRule` in Java) should implement the [`IObserver`](../common/src/main/java/com/ibm/common/IObserver.java) interface, consisting of an `update` method. This function will be called each time the scanner detects a finding, and will pass the finding as a parameter.
 If we want to export all of our findings in a single output structure, like a CBOM, we need some way to aggregate all results.
 This is therefore the purpose of the (empty) interface [`IAggregator`](../output/src/main/java/com/ibm/output/IAggregator.java), implemented in Java by the class [`JavaAggregator`](../java/src/main/java/com/ibm/plugin/JavaAggregator.java) directly in the `plugin` directory.
-The aggregator class can maintain a list of findings, that gets extended each time a new finding is detected and reported through the `update` function.
+Instead of storing findings locally, the aggregator utilizes a thread-safe, consumer-based streaming architecture. It exposes a `registerConsumer(Consumer<INode> consumer)` method that directly pipes findings into a live output target as they are discovered during the scan.
 It also implements a `getLanguageSupport()` method that returns the `ILanguageSupport` (using the `LanguageSupporter` defined [earlier](#implementing-the-language-specific-parts-of-the-engine)), which you should use in your "visit" method (like in `visitNode` above).
-The `JavaAggregator` implementation is quite generic and can be mostly reused for your implementation, after replacing the generic types by the correct ones, and using the correct language supporter.
+The `JavaAggregator` implementation is fully synchronized and serves as the protocol template for supporting concurrent multi-module language scans.
 > [!TIP]
 > By extending the `JavaBaseDetectionRule` class, you can create new high-level SonarQube rules beyond the Inventory rule. The `JavaInventoryRule` is an example of how the underlying cryptographic information (collected by the detection rules) can be utilized. 
 
@@ -322,16 +322,27 @@ context.addExtensions(
         // ...
 )
 ```
-Additionally, update the function `getOutputFile` of the [`ScannerManager`](../sonar-cryptography-plugin/src/main/java/com/ibm/plugin/ScannerManager.java) of the plugin module, to add your aggregate of detections to the final list of detections that will be used for generating the CBOM.
-For Java, it looks like:
+Additionally, update the [`ScannerManager`](../sonar-cryptography-plugin/src/main/java/com/ibm/plugin/ScannerManager.java) of the plugin module to wire up your language aggregators' live consumer pipelines during initialization. Because all languages now use a unified, real-time streaming architecture, nodes are piped into the output file directly upon detection, eliminating the need for lazy in-memory collection merging.
+
+The cross-language streaming orchestration looks like this:
+
 ```java
-public IOutputFile getOutputFile() {
-        List<INode> nodes = new ArrayList<>();
+private void initialize() {
+	this.liveOutputFile = this.outputFileFactory.createOutputFormat(List.of());
 
-        // java
-        nodes.addAll(JavaAggregator.getDetectedNodes());
+	// Create a unified consumer that pipes nodes directly into the live output file
+	Consumer<INode> streamingConsumer = node -> this.liveOutputFile.accept(node);
 
-        // ...
+	// Register this streaming consumer to all active language aggregators
+	for (String aggregator : AGGREGATORS) {
+		registerConsumerWithAggregator(aggregator, streamingConsumer);
+	}
+}
+
+@Nonnull
+public synchronized IOutputFile getOutputFile() {
+	// Return the live reference; it automatically reflects new nodes as they stream in
+	return liveOutputFile;
 }
 ```
 ---

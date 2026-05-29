@@ -66,12 +66,12 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import javax.annotation.Nonnull;
@@ -100,12 +100,12 @@ public class CBOMOutputFile implements IOutputFile {
     @Nonnull private final Map<String, Dependency> dependencies;
 
     public CBOMOutputFile() {
-        this.components = new HashMap<>();
-        this.dependencies = new HashMap<>();
+        this.components = new ConcurrentHashMap<>();
+        this.dependencies = new ConcurrentHashMap<>();
     }
 
     @Override
-    public synchronized void add(@Nonnull Stream<INode> nodes) {
+    public void add(@Nonnull Iterable<INode> nodes) {
         nodes.forEach(node -> processSingleNode(null, node));
     }
 
@@ -171,7 +171,9 @@ public class CBOMOutputFile implements IOutputFile {
             return null;
         }
         addComponentAndDependencies(algorithm, optionalId.get(), parentBomRef, node);
-        return this.components.get(optionalId.get()).getBomRef();
+
+        Component activeComponent = this.components.get(optionalId.get());
+        return activeComponent != null ? activeComponent.getBomRef() : null;
     }
 
     private void createKeyComponent(@Nullable String parentBomRef, @Nonnull Key node) {
@@ -203,11 +205,25 @@ public class CBOMOutputFile implements IOutputFile {
         }
         addComponentAndDependencies(protocol, optionalId.get(), parentBomRef, node);
 
-        Dependency protocolDependency = dependencies.get(protocol.getBomRef());
-        if (protocolDependency != null) {
-            List<String> cryptoRefs =
-                    protocolDependency.getDependencies().stream().map(Dependency::getRef).toList();
-            protocol.getCryptoProperties().getProtocolProperties().setCryptoRefArray(cryptoRefs);
+        Component activeProtocol = this.components.get(optionalId.get());
+        if (activeProtocol != null) {
+            Dependency protocolDependency = dependencies.get(activeProtocol.getBomRef());
+            if (protocolDependency != null) {
+                synchronized (activeProtocol) {
+                    List<String> cryptoRefs =
+                            protocolDependency.getDependencies().stream()
+                                    .map(Dependency::getRef)
+                                    .toList();
+                    if (activeProtocol.getCryptoProperties() != null
+                            && activeProtocol.getCryptoProperties().getProtocolProperties()
+                                    != null) {
+                        activeProtocol
+                                .getCryptoProperties()
+                                .getProtocolProperties()
+                                .setCryptoRefArray(cryptoRefs);
+                    }
+                }
+            }
         }
     }
 
@@ -259,52 +275,70 @@ public class CBOMOutputFile implements IOutputFile {
             @Nonnull String componentId,
             @Nullable String parentBomRef,
             @Nonnull INode node) {
-        if (components.get(componentId) == null) {
-            this.components.putIfAbsent(componentId, component);
-        } else {
-            this.components.computeIfPresent(
-                    componentId,
-                    (id, c) -> {
-                        final List<Occurrence> merge =
-                                Stream.concat(
-                                                c.getEvidence().getOccurrences().stream(),
-                                                component.getEvidence().getOccurrences().stream())
-                                        .filter(
-                                                com.ibm.output.cyclondx.builder.Utils.distinctByKey(
-                                                        o ->
-                                                                o.getLocation()
-                                                                        + " "
-                                                                        + o.getLine()
-                                                                        + " "
-                                                                        + o.getOffset()
-                                                                        + " "
-                                                                        + o.getAdditionalContext()
-                                                                        + " "))
-                                        .toList();
-                        c.getEvidence().setOccurrences(merge);
-                        return c;
+
+        Component resolvedComponent =
+                this.components.compute(
+                        componentId,
+                        (id, existing) -> {
+                            if (existing == null) {
+                                return component;
+                            }
+                            final List<Occurrence> merge =
+                                    Stream.concat(
+                                                    existing
+                                                            .getEvidence()
+                                                            .getOccurrences()
+                                                            .stream(),
+                                                    component
+                                                            .getEvidence()
+                                                            .getOccurrences()
+                                                            .stream())
+                                            .filter(
+                                                    com.ibm.output.cyclondx.builder.Utils
+                                                            .distinctByKey(
+                                                                    o ->
+                                                                            o.getLocation()
+                                                                                    + " "
+                                                                                    + o.getLine()
+                                                                                    + " "
+                                                                                    + o.getOffset()
+                                                                                    + " "
+                                                                                    + o
+                                                                                            .getAdditionalContext()
+                                                                                    + " "))
+                                            .toList();
+                            existing.getEvidence().setOccurrences(merge);
+                            return existing;
+                        });
+
+        if (parentBomRef != null) {
+            Dependency newDependency = new Dependency(resolvedComponent.getBomRef());
+
+            this.dependencies.compute(
+                    parentBomRef,
+                    (s, existingDep) -> {
+                        if (existingDep == null) {
+                            Dependency parent = new Dependency(parentBomRef);
+                            parent.addDependency(newDependency);
+                            return parent;
+                        } else {
+                            if (existingDep.getDependencies() == null
+                                    || existingDep.getDependencies().stream()
+                                            .noneMatch(
+                                                    d ->
+                                                            d.getRef()
+                                                                    .equals(
+                                                                            newDependency
+                                                                                    .getRef()))) {
+                                existingDep.addDependency(newDependency);
+                            }
+                            return existingDep;
+                        }
                     });
         }
 
-        Component componentIdentify = this.components.get(componentId);
-        if (parentBomRef != null) {
-            Dependency newDependency = new Dependency(componentIdentify.getBomRef());
-            if (dependencies.get(parentBomRef) == null) {
-                Dependency parent = new Dependency(parentBomRef);
-                parent.addDependency(newDependency);
-                this.dependencies.putIfAbsent(parentBomRef, parent);
-            } else {
-                this.dependencies.computeIfPresent(
-                        parentBomRef,
-                        (s, d) -> {
-                            d.addDependency(newDependency);
-                            return d;
-                        });
-            }
-        }
-
         if (node.hasChildren()) {
-            addChildren(componentIdentify.getBomRef(), node.getChildren().values());
+            addChildren(resolvedComponent.getBomRef(), node.getChildren().values());
         }
     }
 
@@ -367,9 +401,5 @@ public class CBOMOutputFile implements IOutputFile {
             occurrence.setAdditionalContext(detectionLocation.keywords().get(0));
         }
         return occurrence;
-    }
-
-    public synchronized void accept(@Nonnull INode node) {
-        processSingleNode(null, node);
     }
 }

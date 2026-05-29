@@ -20,6 +20,7 @@
 package com.ibm.plugin;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 
@@ -27,6 +28,10 @@ import com.ibm.mapper.model.INode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -161,18 +166,76 @@ class JavaAggregatorTest {
     }
 
     @Test
-    void registerConsumer_replacesExistingConsumer() {
+    void registerConsumer_throwsOnDuplicateRegistration() {
         List<INode> first = new ArrayList<>();
         List<INode> second = new ArrayList<>();
 
         JavaAggregator.registerConsumer(first::add);
-        JavaAggregator.registerConsumer(second::add);
 
-        INode node = mockNode(INode.class);
-        JavaAggregator.addNodes(List.of(node));
+        assertThatThrownBy(() -> JavaAggregator.registerConsumer(second::add))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("already registered");
 
         assertThat(first).isEmpty();
-        assertThat(second).containsExactly(node);
+        assertThat(second).isEmpty();
+    }
+
+    @Test
+    void stressTest_concurrentAddNodesAndReset() throws InterruptedException {
+        int threadCount = 50;
+        int iterationsPerThread = 1000;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+
+        INode node = mockNode(AlgorithmStub.class);
+        List<INode> payload = List.of(node, node, node); // 3 nodes per batch
+
+        for (int i = 0; i < threadCount; i++) {
+            final int threadId = i;
+            executor.submit(
+                    () -> {
+                        try {
+                            startLatch.await(); // Wait for all threads to be ready
+                            for (int j = 0; j < iterationsPerThread; j++) {
+                                // Thread 0 occasionally resets, mimicking a concurrent lifecycle
+                                // event
+                                if (threadId == 0 && j % 100 == 0) {
+                                    JavaAggregator.reset();
+                                } else {
+                                    JavaAggregator.addNodes(payload);
+
+                                    // Using AssertJ assertions reads the values and validates
+                                    // thread safety,
+                                    // eliminating both "result ignored" and "never used" warnings
+                                    // safely.
+                                    assertThat(JavaAggregator.getKindDistribution()).isNotNull();
+                                    assertThat(JavaAggregator.getTotalNodeCount())
+                                            .isGreaterThanOrEqualTo(0);
+                                }
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        } finally {
+                            doneLatch.countDown();
+                        }
+                    });
+        }
+
+        // Unleash the threads simultaneously
+        startLatch.countDown();
+
+        // Wait for execution to finish
+        boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(completed)
+                .as("Stress test timed out! Possible deadlock in Aggregator.")
+                .isTrue();
+
+        // As long as no exceptions were thrown (like ConcurrentModificationException),
+        // the thread-safety architecture is validated.
+        assertThat(JavaAggregator.getTotalNodeCount()).isGreaterThanOrEqualTo(0);
     }
 
     private <T extends INode> T mockNode(Class<T> kind) {

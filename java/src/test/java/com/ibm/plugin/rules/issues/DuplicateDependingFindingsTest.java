@@ -50,9 +50,9 @@ class DuplicateDependingFindingsTest extends TestBase {
      * called (`oaep.init(...)`). The engine has the same depending detection rule, but it shouldn't
      * be triggered because it is not called for the engine (there is no `engine.init(...)`).
      *
-     * <p>This test verifies that at the level of the detection store, the `init` depending on detection rule
-     * is correctly called only for the `OAEPEncoding` (expected) and not for its engine (unexpected),
-     * ensuring duplicate depending on findings are not propagated.
+     * <p>This test verifies that at the level of the detection store, the `init` depending on
+     * detection rule is correctly called only for the `OAEPEncoding` (expected) and not for its
+     * engine (unexpected), ensuring duplicate depending on findings are not propagated.
      */
     @Test
     void test() {
